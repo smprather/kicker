@@ -1,6 +1,6 @@
-# kickit
+# kicker
 
-`kickit` is a Linux automation tool for script-driven condition checks and actions.
+`kicker` is a Linux automation tool for script-driven condition checks and actions.
 
 - `kicker`: management CLI (rules + daemon control)
 - `kickerd`: foreground daemon process

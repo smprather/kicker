@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "kickit"
+name = "kicker"
 version = "0.1.0"
 description = "Script-driven condition monitor daemon and CLI"
 readme = "README.md"

@@ -1,8 +1,8 @@
-# Kickit Architecture
+# Kicker Architecture
 
 ## Overview
 
-Kickit is a Linux automation tool with:
+Kicker is a Linux automation tool with:
 - `kickerd`: daemon that evaluates condition scripts and runs action scripts.
 - `kicker`: CLI that manages persisted trigger/action rules.
 
