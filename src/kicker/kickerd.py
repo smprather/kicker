@@ -37,12 +37,18 @@ from kicker.daemon_runtime import run_daemon
     is_flag=True,
     help="Suppress duplicate-instance style noise where possible.",
 )
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Print daemon lifecycle and rule-execution debug updates to stdout.",
+)
 def main(
     log_format: str,
     poll_interval: float | None,
     lease_seconds: float | None,
     lease_grace_seconds: float,
     quiet: bool,
+    verbose: bool,
 ) -> None:
     """Run the kickerd daemon loop in the foreground."""
     result = run_daemon(
@@ -51,6 +57,7 @@ def main(
         default_poll_interval=poll_interval,
         lease_seconds=lease_seconds,
         lease_grace_seconds=lease_grace_seconds,
+        status_fn=click.echo if verbose else None,
     )
     if result.message and not (quiet and result.exit_code == 0):
         click.echo(result.message)
@@ -59,4 +66,3 @@ def main(
 
 if __name__ == "__main__":
     main()
-

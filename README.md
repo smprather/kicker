@@ -31,6 +31,7 @@ uv sync
 |---|---|
 | `kicker add ACTION ...` | Add a trigger/action rule |
 | `kicker list` | List configured rules |
+| `kicker stats` | Show per-rule action execution totals and last-24h counts |
 | `kicker remove RULE_ID` | Remove a rule by id |
 | `kicker daemon run ...` | Run daemon loop in foreground |
 | `kicker daemon status` | Show leader metadata/liveness |
@@ -42,8 +43,8 @@ Exactly one trigger mode is required.
 
 | Option | Meaning |
 |---|---|
-| `--if CHECK` | Trigger when check exits non-zero |
-| `--if-zero CHECK` | Trigger when check exits zero |
+| `--if CHECK` / `--if-pass CHECK` | Trigger when check exits zero (pass) |
+| `--if-fail CHECK` | Trigger when check exits non-zero (fail) |
 | `--if-fail-to-pass CHECK` | Trigger on non-zero -> zero transition |
 | `--if-pass-to-fail CHECK` | Trigger on zero -> non-zero transition |
 | `--if-code N --check CHECK` | Trigger when check exits exactly `N` |
@@ -55,6 +56,7 @@ Exactly one trigger mode is required.
 | `--interval` | seconds (float) | global default (`60s`) |
 | `--rate-limit` | `number/seconds` | `1/<poll_interval>` |
 | `--timeout` | seconds (float) | `poll_interval * 0.9` |
+| `--once` | flag | off |
 
 ### `kicker daemon run` Options
 
@@ -64,7 +66,8 @@ Exactly one trigger mode is required.
 | `--poll-interval FLOAT` | config default | Override global poll interval |
 | `--lease-seconds FLOAT` | auto | Leader lease duration |
 | `--lease-grace-seconds FLOAT` | `10.0` | Grace period for takeover |
-| `--quiet` | off | Suppress non-essential messages |
+| `--quiet` | off | Suppress duplicate-instance style noise where possible |
+| `--verbose` | off | Print daemon lifecycle and per-rule execution debug updates to stdout |
 
 ### `kicker daemon stop` Options
 
@@ -75,29 +78,42 @@ Exactly one trigger mode is required.
 
 ### `kickerd` (standalone daemon entrypoint)
 
-`kickerd` supports the same daemon-run options:
+`kickerd` supports the same daemon-run options, plus:
+
+| Option | Description |
+|---|---|
+| `--verbose` | Print daemon lifecycle and per-rule execution debug updates to stdout |
 
 ```bash
-uv run kickerd --log-format plain-text --poll-interval 60
+kickerd --log-format plain-text --poll-interval 60 --verbose
 ```
 
 ## Examples
 
 ```bash
+# Add a rule: run action when check passes
+kicker add run_this.sh --if check_this.sh
+
 # Add a rule: run action when check fails
-uv run kicker add run_this.sh --if check_this.sh
+kicker add run_this.sh --if-fail check_this.sh
 
 # Add a transition rule with a custom interval/rate limit
-uv run kicker add run_this.sh --if-fail-to-pass check_this.sh --interval 30 --rate-limit 1/300
+kicker add run_this.sh --if-fail-to-pass check_this.sh --interval 30 --rate-limit 1/300
+
+# Add a one-shot rule (auto-deletes after first action execution)
+kicker add run_once.sh --if-fail check_this.sh --once
 
 # Inspect rules
-uv run kicker list
+kicker list
+
+# Show action execution stats
+kicker stats
 
 # Start daemon in foreground
-uv run kickerd --log-format json
+kickerd --log-format json
 
 # Stop daemon
-uv run kicker daemon stop --force
+kicker daemon stop --force
 ```
 
 ## Notes

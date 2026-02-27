@@ -35,6 +35,15 @@ class DaemonRunResult:
     message: str
 
 
+@dataclass(slots=True)
+class RuleRunOutcome:
+    check_return_code: int
+    trigger_matched: bool
+    action_executed: bool
+    action_return_code: int | None
+    rate_limited: bool
+
+
 class _StopFlag:
     def __init__(self) -> None:
         self.value = False
@@ -126,6 +135,12 @@ def _record_action_execution(
 ) -> None:
     rule_state = runtime_state.get_rule(rule.id)
     rule_state.action_timestamps.append(now)
+    rule_state.action_timestamps_24h.append(now)
+    cutoff = now - 86400.0
+    rule_state.action_timestamps_24h = [
+        timestamp for timestamp in rule_state.action_timestamps_24h if timestamp >= cutoff
+    ]
+    rule_state.action_executions += 1
 
 
 def _run_rule_once(
@@ -137,7 +152,7 @@ def _run_rule_once(
     home_dir: Path,
     now: float,
     default_poll_interval: float,
-) -> None:
+) -> RuleRunOutcome:
     rule_state = runtime_state.get_rule(rule.id)
     previous_rc = rule_state.last_check_exit
 
@@ -163,7 +178,13 @@ def _run_rule_once(
     rule_state.last_check_at = now
 
     if not trigger_matches(rule, previous_rc, current_rc):
-        return
+        return RuleRunOutcome(
+            check_return_code=current_rc,
+            trigger_matched=False,
+            action_executed=False,
+            action_return_code=None,
+            rate_limited=False,
+        )
 
     if not _should_allow_action(
         rule=rule,
@@ -171,7 +192,13 @@ def _run_rule_once(
         now=now,
         default_poll_interval=default_poll_interval,
     ):
-        return
+        return RuleRunOutcome(
+            check_return_code=current_rc,
+            trigger_matched=True,
+            action_executed=False,
+            action_return_code=None,
+            rate_limited=True,
+        )
 
     action_timeout = effective_timeout(rule, default_poll_interval)
     action_command = _resolve_command(rule.action, scripts_root)
@@ -189,6 +216,13 @@ def _run_rule_once(
         stderr=action_result.stderr,
         return_code=action_result.return_code,
         state=runtime_state,
+    )
+    return RuleRunOutcome(
+        check_return_code=current_rc,
+        trigger_matched=True,
+        action_executed=True,
+        action_return_code=action_result.return_code,
+        rate_limited=False,
     )
 
 
@@ -209,7 +243,12 @@ def run_daemon(
     now_fn: Callable[[], float] = time.time,
     sleep_fn: Callable[[float], None] = time.sleep,
     max_rule_executions: int | None = None,
+    status_fn: Callable[[str], None] | None = None,
 ) -> DaemonRunResult:
+    def emit(message: str) -> None:
+        if status_fn is not None:
+            status_fn(message)
+
     store = config_store or ConfigStore()
     config = store.load()
 
@@ -233,6 +272,13 @@ def run_daemon(
     )
     if not claim.claimed:
         return DaemonRunResult(1, claim.message)
+    emit(claim.message)
+    emit(
+        "Daemon starting: "
+        f"rules={len(config.rules or [])} "
+        f"default_poll_interval={effective_default_poll:g}s "
+        f"lease_seconds={effective_lease_seconds:g}s"
+    )
 
     state_store = runtime_state_store
     if state_store is None:
@@ -286,11 +332,12 @@ def run_daemon(
                     state_dir=state_dir_path,
                 )
                 next_lease_refresh = now + max(1.0, effective_lease_seconds / 2.0)
+                emit("Refreshed leader lease.")
 
             due_rules = [rule for rule in rules if rule_next_due.get(rule.id, now) <= now]
             if due_rules:
                 for rule in due_rules:
-                    _run_rule_once(
+                    outcome = _run_rule_once(
                         rule=rule,
                         runtime_state=runtime_state,
                         logger=logger,
@@ -299,9 +346,25 @@ def run_daemon(
                         now=now,
                         default_poll_interval=effective_default_poll,
                     )
+                    emit(
+                        f"rule=#{rule.id} check_rc={outcome.check_return_code} "
+                        f"trigger_matched={str(outcome.trigger_matched).lower()} "
+                        f"rate_limited={str(outcome.rate_limited).lower()}"
+                    )
+                    if outcome.action_executed:
+                        emit(
+                            f"rule=#{rule.id} action_executed=true "
+                            f"action_rc={outcome.action_return_code}"
+                        )
                     rule_next_due[rule.id] = now + effective_poll_interval(
                         rule, effective_default_poll
                     )
+                    if outcome.action_executed and rule.once:
+                        store.remove_rule(rule.id)
+                        rules = [item for item in rules if item.id != rule.id]
+                        rule_next_due.pop(rule.id, None)
+                        runtime_state.rules.pop(rule.id, None)
+                        emit(f"rule=#{rule.id} removed due to once=true")
                     executions += 1
                     if (
                         max_rule_executions is not None
@@ -320,5 +383,6 @@ def run_daemon(
         release_leader_claim(state_dir_path)
         signal.signal(signal.SIGINT, previous_int)
         signal.signal(signal.SIGTERM, previous_term)
+        emit("Daemon exiting.")
 
     return DaemonRunResult(0, "Daemon stopped.")

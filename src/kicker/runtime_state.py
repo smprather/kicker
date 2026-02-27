@@ -13,15 +13,21 @@ class RuleRuntimeState:
     last_check_exit: int | None = None
     last_check_at: float | None = None
     action_timestamps: list[float] = field(default_factory=list)
+    action_timestamps_24h: list[float] = field(default_factory=list)
+    action_executions: int = 0
 
     @classmethod
     def from_dict(cls, payload: dict[str, Any]) -> "RuleRuntimeState":
         last_check_exit_raw = payload.get("last_check_exit")
         last_check_at_raw = payload.get("last_check_at")
         action_timestamps_raw = payload.get("action_timestamps", [])
+        action_timestamps_24h_raw = payload.get("action_timestamps_24h", [])
+        action_executions_raw = payload.get("action_executions", 0)
 
         if not isinstance(action_timestamps_raw, list):
             raise ValueError("action_timestamps must be a list")
+        if not isinstance(action_timestamps_24h_raw, list):
+            raise ValueError("action_timestamps_24h must be a list")
 
         return cls(
             last_check_exit=(
@@ -29,6 +35,8 @@ class RuleRuntimeState:
             ),
             last_check_at=float(last_check_at_raw) if last_check_at_raw is not None else None,
             action_timestamps=[float(item) for item in action_timestamps_raw],
+            action_timestamps_24h=[float(item) for item in action_timestamps_24h_raw],
+            action_executions=int(action_executions_raw),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -36,6 +44,8 @@ class RuleRuntimeState:
             "last_check_exit": self.last_check_exit,
             "last_check_at": self.last_check_at,
             "action_timestamps": self.action_timestamps,
+            "action_timestamps_24h": self.action_timestamps_24h,
+            "action_executions": self.action_executions,
         }
 
 
@@ -99,4 +109,3 @@ class RuntimeStateStore:
     def save(self, state: RuntimeState) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(state.to_dict(), indent=2) + "\n", encoding="utf-8")
-

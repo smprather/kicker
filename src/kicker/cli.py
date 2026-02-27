@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import time
 
 import rich_click as click
 
@@ -10,20 +11,21 @@ from kicker.daemon_control import load_leader_info, stop_active_daemon
 from kicker.daemon_runtime import run_daemon
 from kicker.models import Rule
 from kicker.rule_logic import parse_rate_limit
+from kicker.runtime_state import RuntimeStateStore
 
 
 def _resolve_trigger_definition(
     *,
-    if_nonzero: str | None,
-    if_zero: str | None,
+    if_pass: str | None,
+    if_fail: str | None,
     if_fail_to_pass: str | None,
     if_pass_to_fail: str | None,
     if_code: int | None,
     check: str | None,
 ) -> tuple[str, str, int | None]:
     selected = [
-        ("on_nonzero", if_nonzero, None),
-        ("on_zero", if_zero, None),
+        ("on_zero", if_pass, None),
+        ("on_nonzero", if_fail, None),
         ("on_transition_fail_to_pass", if_fail_to_pass, None),
         ("on_transition_pass_to_fail", if_pass_to_fail, None),
     ]
@@ -36,7 +38,7 @@ def _resolve_trigger_definition(
 
     if len(chosen) != 1:
         raise click.BadParameter(
-            "Specify exactly one trigger mode: --if / --if-zero / "
+            "Specify exactly one trigger mode: --if/--if-pass / --if-fail / "
             "--if-fail-to-pass / --if-pass-to-fail / --if-code + --check"
         )
 
@@ -61,7 +63,8 @@ def _format_rule_line(rule: Rule, default_poll_interval: float) -> str:
 
     return (
         f"#{rule.id} trigger={trigger_text} interval={poll:g}s rate={rate} "
-        f"timeout={timeout:g}s check={rule.check!r} action={rule.action!r}"
+        f"timeout={timeout:g}s once={str(rule.once).lower()} "
+        f"check={rule.check!r} action={rule.action!r}"
     )
 
 
@@ -84,8 +87,17 @@ def main() -> None:
 
 @main.command("add")
 @click.argument("action")
-@click.option("if_nonzero", "--if", help="Run action when check returns non-zero.")
-@click.option("if_zero", "--if-zero", help="Run action when check returns zero.")
+@click.option(
+    "if_pass",
+    "--if",
+    "--if-pass",
+    help="Run action when check returns zero (pass).",
+)
+@click.option(
+    "if_fail",
+    "--if-fail",
+    help="Run action when check returns non-zero (fail).",
+)
 @click.option(
     "if_fail_to_pass",
     "--if-fail-to-pass",
@@ -118,10 +130,15 @@ def main() -> None:
     default=None,
     help="Per-rule check/action timeout in seconds.",
 )
+@click.option(
+    "--once",
+    is_flag=True,
+    help="Auto-delete the rule after its action is executed once.",
+)
 def add_rule_command(
     action: str,
-    if_nonzero: str | None,
-    if_zero: str | None,
+    if_pass: str | None,
+    if_fail: str | None,
     if_fail_to_pass: str | None,
     if_pass_to_fail: str | None,
     if_code: int | None,
@@ -129,11 +146,12 @@ def add_rule_command(
     interval: float | None,
     rate_limit: str | None,
     timeout: float | None,
+    once: bool,
 ) -> None:
     """Add a trigger/action rule."""
     mode, check_command, trigger_code = _resolve_trigger_definition(
-        if_nonzero=if_nonzero,
-        if_zero=if_zero,
+        if_pass=if_pass,
+        if_fail=if_fail,
         if_fail_to_pass=if_fail_to_pass,
         if_pass_to_fail=if_pass_to_fail,
         if_code=if_code,
@@ -160,6 +178,7 @@ def add_rule_command(
         check=check_command,
         action=action,
         trigger_mode=mode,  # type: ignore[arg-type]
+        once=once,
         trigger_code=trigger_code,
         poll_interval_seconds=interval,
         rate_limit_count=rate_count,
@@ -201,6 +220,31 @@ def remove_rule_command(rule_id: int) -> None:
     click.echo(f"Removed rule #{rule_id}")
 
 
+@main.command("stats")
+def stats_command() -> None:
+    """Show per-rule action execution counts."""
+    config = ConfigStore().load()
+    rules = sorted(config.rules or [], key=lambda item: item.id)
+    if not rules:
+        click.echo("No rules configured.")
+        return
+
+    runtime_state = RuntimeStateStore().load()
+    now = time.time()
+    click.echo("rule_id  action_executions  action_executions_24h")
+    for rule in rules:
+        state = runtime_state.rules.get(rule.id)
+        if state is None:
+            total = 0
+            last_24h = 0
+        else:
+            total = state.action_executions
+            last_24h = sum(
+                1 for timestamp in state.action_timestamps_24h if (now - timestamp) < 86400.0
+            )
+        click.echo(f"{rule.id:<7}  {total:<17}  {last_24h}")
+
+
 @main.group()
 def daemon() -> None:
     """Manage the kickerd daemon."""
@@ -233,13 +277,23 @@ def daemon() -> None:
     show_default=True,
     help="Grace period after lease expiry before takeover is allowed.",
 )
-@click.option("--quiet", is_flag=True, help="Suppress non-essential messages.")
+@click.option(
+    "--quiet",
+    is_flag=True,
+    help="Suppress duplicate-instance style noise where possible.",
+)
+@click.option(
+    "--verbose",
+    is_flag=True,
+    help="Print daemon lifecycle and rule-execution debug updates to stdout.",
+)
 def daemon_run(
     log_format: str,
     poll_interval: float | None,
     lease_seconds: float | None,
     lease_grace_seconds: float,
     quiet: bool,
+    verbose: bool,
 ) -> None:
     """Run the daemon loop in the foreground."""
     result = run_daemon(
@@ -248,6 +302,7 @@ def daemon_run(
         default_poll_interval=poll_interval,
         lease_seconds=lease_seconds,
         lease_grace_seconds=lease_grace_seconds,
+        status_fn=click.echo if verbose else None,
     )
     if result.message and not (quiet and result.exit_code == 0):
         click.echo(result.message)

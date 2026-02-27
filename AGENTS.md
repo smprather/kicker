@@ -55,3 +55,10 @@ PRs should include:
 - Linked issue/task ID when available.
 - Test evidence (`uv run pytest -q` output summary).
 - Example CLI usage or log snippet when behavior changes.
+
+## Documentation
+
+- When writing documentation files, like README.md, don't use "uv run" in the examples.
+  The tool will be properly installed. Uv run is just for use by developers.
+- ALWAYS keep the README.md documentation fully up to date with any changes to the user
+  interface.

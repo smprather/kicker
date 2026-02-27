@@ -55,6 +55,7 @@ Each rule has:
 - A check script.
 - An action script.
 - A trigger mode.
+- Optional one-shot execution mode (`once`) that auto-deletes the rule after the first action execution.
 
 Supported trigger modes:
 - `on_nonzero`: fire when check exits non-zero.
@@ -90,9 +91,12 @@ Execution directory behavior:
 
 ## CLI (Planned)
 
-- `kicker add run_this.sh --if check_this.sh`
+- `kicker add run_this.sh --if check_this.sh` (check returns zero / pass)
+- `kicker add run_this.sh --if-fail check_this.sh` (check returns non-zero / fail)
 - `kicker add run_this.sh --if-fail-to-pass check_if_file_exists.sh`
+- `kicker add run_once.sh --if-fail check_this.sh --once`
 - `kicker list`
+- `kicker stats`
 - `kicker remove N`
 - `kicker daemon stop [--force] [--quiet]`
 

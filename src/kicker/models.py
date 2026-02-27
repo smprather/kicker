@@ -28,6 +28,7 @@ class Rule:
     check: str
     action: str
     trigger_mode: TriggerMode
+    once: bool = False
     trigger_code: int | None = None
     poll_interval_seconds: float | None = None
     rate_limit_count: int | None = None
@@ -53,6 +54,7 @@ class Rule:
             check=str(payload["check"]),
             action=str(payload["action"]),
             trigger_mode=trigger_mode,  # type: ignore[arg-type]
+            once=bool(payload.get("once", False)),
             trigger_code=trigger_code,
             poll_interval_seconds=float(poll_raw) if poll_raw is not None else None,
             rate_limit_count=int(rate_count_raw) if rate_count_raw is not None else None,
@@ -70,6 +72,7 @@ class Rule:
             "check": self.check,
             "action": self.action,
             "trigger_mode": self.trigger_mode,
+            "once": self.once,
             "trigger_code": self.trigger_code,
             "poll_interval_seconds": self.poll_interval_seconds,
             "rate_limit_count": self.rate_limit_count,
@@ -161,4 +164,3 @@ class RuleConfig:
         if not rules:
             return 1
         return max(rule.id for rule in rules) + 1
-
