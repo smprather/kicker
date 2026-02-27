@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kickit"
+version = "0.1.0"
+description = "Script-driven condition monitor daemon and CLI"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "rich-click>=1.8.9",
+]
+
+[project.scripts]
+kicker = "kicker.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kicker"]
