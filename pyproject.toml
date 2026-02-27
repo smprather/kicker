@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 kicker = "kicker.cli:main"
+kickerd = "kicker.kickerd:main"
 
 [dependency-groups]
 dev = [

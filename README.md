@@ -1,67 +1,107 @@
 # kickit
 
-`kickit` is a Linux automation tool in active bootstrap phase.
+`kickit` is a Linux automation tool for script-driven condition checks and actions.
 
-- `kickerd`: daemon that evaluates condition scripts and runs action scripts.
-- `kicker`: CLI used to manage and control daemon behavior.
+- `kicker`: management CLI (rules + daemon control)
+- `kickerd`: foreground daemon process
 
 Architecture spec: [docs/architecture.md](docs/architecture.md)
 
-## Install / Run
+## Install
 
 ```bash
 uv sync
-uv run kicker --help
 ```
 
-## Command Tree (Implemented)
+## Paths
 
-| Level | Command | Description |
-|---|---|---|
-| Root | `kicker` | Main CLI entrypoint |
-| Group | `kicker daemon` | Daemon lifecycle commands |
-| Command | `kicker daemon stop` | Stop active daemon for current user's state directory |
-
-## Complete CLI Reference
-
-### Commands
-
-| Command | Description | Exit Behavior |
-|---|---|---|
-| `kicker` | Root command group | Exits `0` on help/success |
-| `kicker daemon` | Daemon command group | Exits `0` on help/success |
-| `kicker daemon stop` | Stops active daemon using leader metadata | Exits non-zero on failure |
-
-### Options
-
-| Scope | Option | Type | Default | Description |
-|---|---|---|---|---|
-| `kicker` | `--help` | flag | `false` | Show root help and exit |
-| `kicker daemon` | `--help` | flag | `false` | Show daemon group help and exit |
-| `kicker daemon stop` | `--force` | flag | `false` | Escalate to `SIGKILL` if `SIGTERM` does not stop daemon |
-| `kicker daemon stop` | `--quiet` | flag | `false` | Return success when no daemon is running |
-| `kicker daemon stop` | `--help` | flag | `false` | Show command help and exit |
-
-## `kicker daemon stop` Behavior
-
-| Step | Behavior |
+| Purpose | Path |
 |---|---|
-| Metadata lookup | Reads `~/.local/state/kicker/leader.json` |
-| Host safety | Refuses stop if leader host differs from current host |
-| Graceful stop | Sends `SIGTERM` first and waits briefly |
-| Forced stop | With `--force`, escalates to `SIGKILL` if still alive |
-| Stale metadata | Clears stale leader file when PID is not running |
-| No daemon | Returns non-zero unless `--quiet` is set |
+| Rule config | `~/.config/kicker/config.yaml` |
+| User scripts | `~/.config/kicker/scripts/` |
+| Daemon state | `~/.local/state/kicker/` |
+| Check log | `~/.local/state/kicker/kicker_checks.log` |
+| Action log | `~/.local/state/kicker/kicker_actions.log` |
 
-## Planned (Not Yet Implemented)
+## Command Reference
 
-Planned rule-management commands from the architecture doc:
-- `kicker add ...`
-- `kicker list`
-- `kicker remove ...`
+### `kicker` Commands
 
-## Development Notes
+| Command | Description |
+|---|---|
+| `kicker add ACTION ...` | Add a trigger/action rule |
+| `kicker list` | List configured rules |
+| `kicker remove RULE_ID` | Remove a rule by id |
+| `kicker daemon run ...` | Run daemon loop in foreground |
+| `kicker daemon status` | Show leader metadata/liveness |
+| `kicker daemon stop [--force] [--quiet]` | Stop active daemon |
 
-- Python `>=3.14`
-- Tooling: `uv`, `ruff`, `ty`, `pytest`, Rich Click
-- Contributor/agent guidance: [AGENTS.md](AGENTS.md)
+### `kicker add` Trigger Options
+
+Exactly one trigger mode is required.
+
+| Option | Meaning |
+|---|---|
+| `--if CHECK` | Trigger when check exits non-zero |
+| `--if-zero CHECK` | Trigger when check exits zero |
+| `--if-fail-to-pass CHECK` | Trigger on non-zero -> zero transition |
+| `--if-pass-to-fail CHECK` | Trigger on zero -> non-zero transition |
+| `--if-code N --check CHECK` | Trigger when check exits exactly `N` |
+
+### `kicker add` Optional Rule Controls
+
+| Option | Format | Default |
+|---|---|---|
+| `--interval` | seconds (float) | global default (`60s`) |
+| `--rate-limit` | `number/seconds` | `1/<poll_interval>` |
+| `--timeout` | seconds (float) | `poll_interval * 0.9` |
+
+### `kicker daemon run` Options
+
+| Option | Default | Description |
+|---|---|---|
+| `--log-format [plain-text\|json]` | `plain-text` | Check/action log format |
+| `--poll-interval FLOAT` | config default | Override global poll interval |
+| `--lease-seconds FLOAT` | auto | Leader lease duration |
+| `--lease-grace-seconds FLOAT` | `10.0` | Grace period for takeover |
+| `--quiet` | off | Suppress non-essential messages |
+
+### `kicker daemon stop` Options
+
+| Option | Description |
+|---|---|
+| `--force` | Escalate to `SIGKILL` if `SIGTERM` does not stop daemon |
+| `--quiet` | Return success if no daemon is running |
+
+### `kickerd` (standalone daemon entrypoint)
+
+`kickerd` supports the same daemon-run options:
+
+```bash
+uv run kickerd --log-format plain-text --poll-interval 60
+```
+
+## Examples
+
+```bash
+# Add a rule: run action when check fails
+uv run kicker add run_this.sh --if check_this.sh
+
+# Add a transition rule with a custom interval/rate limit
+uv run kicker add run_this.sh --if-fail-to-pass check_this.sh --interval 30 --rate-limit 1/300
+
+# Inspect rules
+uv run kicker list
+
+# Start daemon in foreground
+uv run kickerd --log-format json
+
+# Stop daemon
+uv run kicker daemon stop --force
+```
+
+## Notes
+
+- Check/action commands execute with working directory set to the invoking user's home directory.
+- Config file is stored at `config.yaml` and currently written/read as JSON-compatible YAML.
+- Leader metadata includes host/pid/lease fields and is used to enforce single active daemon per filespace.
